@@ -3,7 +3,7 @@
 client_id = "1344be192cc40715e1b49466fcfc7d47"
 name = "Dev Gold App"
 handle = "dev-gold-app"
-application_url = "https://oils-threat-renaissance-oliver.trycloudflare.com"
+application_url = "https://houses-rental-silly-dvd.trycloudflare.com"
 embedded = true
 
 [build]
@@ -17,9 +17,9 @@ scopes = "read_customers,read_draft_orders,read_inventory,read_orders,read_produ
 
 [auth]
 redirect_urls = [
-  "https://oils-threat-renaissance-oliver.trycloudflare.com/auth/callback",
-  "https://oils-threat-renaissance-oliver.trycloudflare.com/auth/shopify/callback",
-  "https://oils-threat-renaissance-oliver.trycloudflare.com/api/auth/callback"
+  "https://houses-rental-silly-dvd.trycloudflare.com/auth/callback",
+  "https://houses-rental-silly-dvd.trycloudflare.com/auth/shopify/callback",
+  "https://houses-rental-silly-dvd.trycloudflare.com/api/auth/callback"
 ]
 
 [webhooks]

@@ -1,23 +1,31 @@
+import React, { useState } from 'react';
 import { Page, Layout, Card, Button, BlockStack, Text } from '@shopify/polaris';
 import { TitleBar } from '@shopify/app-bridge-react';
 import { Form } from '@remix-run/react';
 import { json } from '@remix-run/node';
 import { authenticate } from '../shopify.server';
-
+import database from "../db.server";
 
 export async function action({ request }) {
+    const current_rate = await database.SaveRates.findFirst();
+    if (!current_rate) {
+        console.log("Gold and GST rate not updated");
+        return json({ error: 'No current rates found.' }, { status: 400 });
+    }
+
     try {
         // Authenticate and retrieve admin details
         const { admin } = await authenticate.admin(request);
 
-        let hasNextPage = true;
+        let hasNextPage = true; // Set to true to enter the loop initially
         let cursor = null;
+        let totalProductsUpdated = 0; // Track the total number of products updated
 
         while (hasNextPage) {
             // Run the GraphQL query to fetch products with the 'Gold_22K' tag
             const response = await admin.graphql(`
                 query ($cursor: String) {
-                    products(first: 200, query: "tag:Gold_22K", after: $cursor) {
+                    products(first: 250, query: "tag:Gold_22K", after: $cursor) {
                         edges {
                             node {
                                 id
@@ -53,61 +61,65 @@ export async function action({ request }) {
             cursor = result.data.products.pageInfo.endCursor;
 
             if (gold22KProducts.length > 0) {
-                console.log(`Found ${gold22KProducts.length} products with the 'Gold_22K' tag:`);
-
-                // Iterate through the products and update their prices
                 for (const product of gold22KProducts) {
                     const { id, metafields, variants } = product.node;
-
-                    console.log("Product ID: " + id);
 
                     // Initialize variables to hold gold_weight and making_charges
                     let goldWeight = null;
                     let makingCharges = null;
+                    let stonePrice = null;
 
-                    // Extract gold_weight and making_charges from the product metafields
+                    // Extract gold_weight, making_charges, and stone_price from the product metafields
                     if (metafields && metafields.edges.length > 0) {
                         metafields.edges.forEach(({ node: { key, value } }) => {
                             if (key === 'gold_weight') {
                                 goldWeight = parseFloat(value);
                             } else if (key === 'making_charges') {
                                 makingCharges = parseFloat(value);
+                            } else if (key === 'stone_price') {
+                                stonePrice = parseFloat(value);
                             }
                         });
                     }
 
-                    // Process variants to get the default variant ID
-                    let variantId = variants.nodes.length > 0 ? variants.nodes[0].id : null;
+                    // Get the default variant ID
+                    const variantId = variants.nodes.length > 0 ? variants.nodes[0].id : null;
 
-                    // Log the values before proceeding
-                    console.log(`Gold Weight: ${goldWeight}, Making Charges: ${makingCharges}, Variant ID: ${variantId}`);
+                    if (!variantId) {
+                        console.log(`No variant found for Product ID: ${id}`);
+                        continue; // Skip to the next product if no variant ID is found
+                    }
 
-                    // Placeholder for your fetched gold rate. Replace with actual dynamic fetching.
-                    const goldRate = 7000;
-                    const newPrice = calculatePrice(goldWeight, makingCharges, goldRate);
+                    const goldRate = current_rate.goldRate;
+                    const gstRate = current_rate.gstRate;
+
+                    const goldActualPrice = goldRate * goldWeight;
+                    const goldMakingAmount = (stonePrice + goldActualPrice) * makingCharges / 100;
+                    const gstAmount = (stonePrice + goldMakingAmount + goldActualPrice) * gstRate / 100;
+                    const newPrice = Math.round(goldActualPrice + goldMakingAmount + stonePrice + gstAmount);
 
                     try {
                         // Update the variant price using a GraphQL mutation
                         const updateResponse = await admin.graphql(`#graphql
-                                    mutation UpdateProductVariantsPrices($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-                                        productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-                                            productVariants {
-                                                id
-                                                price
-                                            }
-                                            userErrors {
-                                                field
-                                                message
-                                            }
-                                        }
+                            mutation UpdateProductVariantsPrices($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+                                productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+                                    productVariants {
+                                        id
+                                        price
                                     }
-                                `, {
+                                    userErrors {
+                                        field
+                                        message
+                                    }
+                                }
+                            }
+                        `, {
                             variables: {
-                                productId: id, // Replace with actual product ID as needed
+                                productId: id, // Product ID
                                 variants: [
                                     {
-                                        id: variantId, // Replace with actual variant ID as needed
-                                        price: newPrice
+                                        id: variantId, // Variant ID
+                                        price: newPrice // New price
                                     }
                                 ]
                             }
@@ -115,7 +127,8 @@ export async function action({ request }) {
 
                         const updateResult = await updateResponse.json();
                         if (updateResult.data && !updateResult.data.productVariantsBulkUpdate.userErrors.length) {
-                            console.log(`Updated price for Product ID: ${id}`);
+                            totalProductsUpdated++;
+                            console.log(`Updated price for Product ID: ${id} with new Price: ${newPrice}`);
                         } else {
                             console.error(`Error updating Product ID: ${id}`, updateResult.data.productVariantsBulkUpdate.userErrors);
                         }
@@ -127,6 +140,10 @@ export async function action({ request }) {
                 console.log("No products found with the tag 'Gold_22K'.");
             }
         }
+
+        // Log total products updated
+        console.log(`Total Products Updated: ${totalProductsUpdated}`);
+
     } catch (err) {
         console.error('Error during processing:', err.message);
         return json({ error: err.message }, { status: 500 });
@@ -135,17 +152,13 @@ export async function action({ request }) {
     return null;
 }
 
-function calculatePrice(goldWeight, makingCharges, goldRate) {
-    if (goldWeight && makingCharges) {
-        const goldActualPrice = goldRate * goldWeight;
-        const goldMakingAmount = (goldActualPrice * makingCharges) / 100;
-        const total = goldActualPrice + goldMakingAmount;
-        return total.toFixed(2);
-    }
-    return null;
-}
-
 export default function Apply() {
+    const [loading, setLoading] = useState(false);
+
+    const handleSubmit = async () => {
+        setLoading(true);
+    };
+
     return (
         <Page>
             <TitleBar title="Update GOLD Price" />
@@ -157,13 +170,13 @@ export default function Apply() {
                                 <Text variant="headingMd" as="h2">
                                     Set new gold rate for the entire store
                                 </Text>
-                                <Form method="post">
+                                <Form method="post" onSubmit={handleSubmit}>
                                     <p>
                                         Updating the gold product pricing will affect the product rate on the live website.
                                     </p>
                                     <br />
-                                    <Button variant="primary" submit>
-                                        Update
+                                    <Button variant="primary" submit loading={loading}>
+                                        {loading ? 'Updating...' : 'Update'}
                                     </Button>
                                 </Form>
                             </BlockStack>
