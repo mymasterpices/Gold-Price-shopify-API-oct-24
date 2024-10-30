@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Page, Layout, Card, Button, BlockStack, Text } from '@shopify/polaris';
 import { TitleBar } from '@shopify/app-bridge-react';
-import { Form } from '@remix-run/react';
+import { Form, useFetcher } from '@remix-run/react';
 import { json } from '@remix-run/node';
 import { authenticate } from '../shopify.server';
 import database from "../db.server";
@@ -12,17 +12,14 @@ export async function action({ request }) {
         console.log("Gold and GST rate not updated");
         return json({ error: 'No current rates found.' }, { status: 400 });
     }
-
     try {
-        // Authenticate and retrieve admin details
         const { admin } = await authenticate.admin(request);
 
-        let hasNextPage = true; // Set to true to enter the loop initially
-        let cursor = null;
-        let totalProductsUpdated = 0; // Track the total number of products updated
+        let hasNextPage = true;
+        let endCursor = null;
+        let totalProductsUpdated = 0;
 
         while (hasNextPage) {
-            // Run the GraphQL query to fetch products with the 'Gold_22K' tag
             const response = await admin.graphql(`
                 query ($cursor: String) {
                     products(first: 250, query: "tag:Gold_22K", after: $cursor) {
@@ -53,12 +50,19 @@ export async function action({ request }) {
                         }
                     }
                 }
-            `, { cursor });
+            `, {
+                variables: {
+                    cursor: endCursor
+                }
+            });
 
             const result = await response.json();
+
+            // Ensure the result contains expected data
+            if (!result.data || !result.data.products) {
+                throw new Error("Unexpected API response structure");
+            }
             const gold22KProducts = result.data.products.edges;
-            hasNextPage = result.data.products.pageInfo.hasNextPage;
-            cursor = result.data.products.pageInfo.endCursor;
 
             if (gold22KProducts.length > 0) {
                 for (const product of gold22KProducts) {
@@ -139,25 +143,44 @@ export async function action({ request }) {
             } else {
                 console.log("No products found with the tag 'Gold_22K'.");
             }
+
+            const pageInfo = result.data.products.pageInfo;
+            hasNextPage = pageInfo.hasNextPage;
+            endCursor = pageInfo.endCursor;
+
+            if (!hasNextPage) {
+                console.log("No more pages to fetch.");
+            }
         }
 
-        // Log total products updated
-        console.log(`Total Products Updated: ${totalProductsUpdated}`);
+        // Return success status to update the button
+        return json({ success: true, message: 'All products successfully updated' });
 
     } catch (err) {
         console.error('Error during processing:', err.message);
-        return json({ error: err.message }, { status: 500 });
+        return json({ error: err.message });
     }
-
-    return null;
 }
 
 export default function Apply() {
+    const fetcher = useFetcher();
     const [loading, setLoading] = useState(false);
+    const [success, setSuccess] = useState(false);
 
-    const handleSubmit = async () => {
+    const handleSubmit = () => {
         setLoading(true);
+        setSuccess(false);
     };
+
+    // Watch fetcher to see when action completes successfully
+    React.useEffect(() => {
+        if (fetcher.data?.success) {
+            setLoading(false);
+            setSuccess(true);
+        } else if (fetcher.data?.error) {
+            setLoading(false);
+        }
+    }, [fetcher.data]);
 
     return (
         <Page>
@@ -170,15 +193,15 @@ export default function Apply() {
                                 <Text variant="headingMd" as="h2">
                                     Set new gold rate for the entire store
                                 </Text>
-                                <Form method="post" onSubmit={handleSubmit}>
+                                <fetcher.Form method="post" onSubmit={handleSubmit}>
                                     <p>
                                         Updating the gold product pricing will affect the product rate on the live website.
                                     </p>
                                     <br />
                                     <Button variant="primary" submit loading={loading}>
-                                        {loading ? 'Updating...' : 'Update'}
+                                        {success ? 'All products successfully updated' : loading ? 'Updating...' : 'Update'}
                                     </Button>
-                                </Form>
+                                </fetcher.Form>
                             </BlockStack>
                         </Card>
                     </Layout.Section>

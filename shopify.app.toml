@@ -3,7 +3,7 @@
 client_id = "1344be192cc40715e1b49466fcfc7d47"
 name = "Dev Gold App"
 handle = "dev-gold-app"
-application_url = "https://houses-rental-silly-dvd.trycloudflare.com"
+application_url = "https://fold-congratulations-everything-belgium.trycloudflare.com"
 embedded = true
 
 [build]
@@ -17,9 +17,9 @@ scopes = "read_customers,read_draft_orders,read_inventory,read_orders,read_produ
 
 [auth]
 redirect_urls = [
-  "https://houses-rental-silly-dvd.trycloudflare.com/auth/callback",
-  "https://houses-rental-silly-dvd.trycloudflare.com/auth/shopify/callback",
-  "https://houses-rental-silly-dvd.trycloudflare.com/api/auth/callback"
+  "https://fold-congratulations-everything-belgium.trycloudflare.com/auth/callback",
+  "https://fold-congratulations-everything-belgium.trycloudflare.com/auth/shopify/callback",
+  "https://fold-congratulations-everything-belgium.trycloudflare.com/api/auth/callback"
 ]
 
 [webhooks]
